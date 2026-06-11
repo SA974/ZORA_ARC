@@ -72,3 +72,66 @@ Qualifier avant d’activer.
 Documenter avant d’affirmer.
 Auditer avant de livrer.
 Corriger avant de conclure.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         ZORA_ARC V9.1 — ARC-MEM                             │
+│        RAG spatial, vectoriel, probatoire et auditable sous PostgreSQL        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+        1. ENTRÉE STRUCTURÉE
+        ┌────────────────────┐
+        │ Question utilisateur│
+        └─────────┬──────────┘
+                  ↓
+        ┌────────────────────┐
+        │ TASKCARD + Score   │
+        └─────────┬──────────┘
+                  ↓
+        ┌────────────────────┐
+        │ Routeur ARC : SR   │
+        └─────────┬──────────┘
+                  ↓
+
+        2. MODULES ARC
+        ┌────────────────────────────────────────────────────┐
+        │ M1 PARA │ M2 Résumé │ M3 Complexité │ M4 Preuves   │
+        │ M5 Réglementaire │ M6 Scientifique │ M7 Spatial   │
+        │ M8 RAG documentaire                              │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+
+        3. BASE CENTRALE POSTGRESQL
+        ┌────────────────────────────────────────────────────┐
+        │ PostgreSQL                                         │
+        │ ├─ PostGIS    : lieux, distances, territoires      │
+        │ ├─ pgvector   : embeddings, similarité             │
+        │ ├─ mem_types / mem_entities                        │
+        │ ├─ mem_schemas / mem_facts                         │
+        │ ├─ chunks / mem_fact_chunks                        │
+        │ ├─ mem_bridges                                    │
+        │ ├─ taskcards                                      │
+        │ └─ arc_audit_log                                  │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+
+        4. MÉMOIRE ARC-MEM
+        ┌────────────────────────────────────────────────────┐
+        │ L1 Ontologie : types, schémas, règles              │
+        │ L2 Faits     : triplets, relations, validités      │
+        │ L3 Passages  : textes sources, preuves             │
+        │ L4 Geo-RAG   : position, échelle, temps, contexte  │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+
+        5. RETRIEVAL + AUDIT
+        ┌────────────────────────────────────────────────────┐
+        │ Python externe : Personalized PageRank             │
+        │ Gates : G0 Format, G1 Preuves, G2 Cohérence,       │
+        │         G3 Risques, G4 Réplicabilité               │
+        │ PATCH si erreur                                    │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+        ┌────────────────────────────────────────────────────┐
+        │ Réponse finale : sourcée, auditée, corrigée,       │
+        │ exploitable par Stéphane, Zora ou Codex            │
+        └──────────────────────────────────────────────────
