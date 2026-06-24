@@ -91,6 +91,37 @@ def _already_ingested(file_hash: str) -> str | None:
         return str(row["id"]) if row else None
 
 
+def _extract_chunks_to_memgraph(
+    chunk_pairs: list[tuple[Any, str]], document_id: str, *, detect_conflicts: bool = False
+) -> dict[str, Any]:
+    """Lance l'extraction MemGraphRAG (entités/faits/passages) chunk par chunk.
+
+    Isolation stricte : chaque chunk est traité indépendamment ; un échec d'extraction
+    (LLM, parsing) est journalisé et n'interrompt ni les autres chunks ni l'ingestion.
+    """
+    from app.services.ingestion_pipeline import IngestionPipeline
+
+    pipeline = IngestionPipeline()
+    if not pipeline.configured():
+        return {"status": "skipped_llm_not_configured", "entities": 0, "facts": 0, "conflicts": 0}
+
+    entities = facts = conflicts = errors = 0
+    for chunk, chunk_id in chunk_pairs:
+        try:
+            res = pipeline.extract_and_store(
+                chunk.content, source_document_id=document_id, source_chunk_id=chunk_id,
+                detect_conflicts=detect_conflicts,
+            )
+            entities += res["entities"]
+            facts += res["facts"]
+            conflicts += len(res["conflicts"])
+        except Exception as exc:  # noqa: BLE001 - isolation par chunk
+            errors += 1
+            logger.warning("extraction chunk %s ignorée: %s", chunk_id, type(exc).__name__)
+    return {"status": "done", "entities": entities, "facts": facts,
+            "conflicts": conflicts, "errors": errors}
+
+
 def ingest_pdf_file(
     path: str | Path,
     domain: str = "bibliotheque",
@@ -99,6 +130,8 @@ def ingest_pdf_file(
     max_pages: int = 0,
     embedder: EmbeddingService | None = None,
     post_embed_delay: float = 0.0,
+    extract: bool = False,
+    detect_conflicts: bool = False,
 ) -> dict[str, Any]:
     """Ingère UN PDF dans `zora` (base unique), de façon atomique et idempotente.
 
@@ -156,6 +189,7 @@ def ingest_pdf_file(
         "ingested_at": ingested_at, "embedding_model": model, "source": "bridge-pdf",
     }
 
+    chunk_pairs: list[tuple[Any, str]] = []  # (chunk, chunk_id) pour l'extraction optionnelle
     with get_connection() as conn:
         with conn.transaction():
             with conn.cursor() as cur:
@@ -179,13 +213,26 @@ def ingest_pdf_file(
                         insert into zora.chunks(document_id, ordinal, content, embedding, metadata)
                         values (%s, %s, %s, %s::vector, %s::jsonb)
                         on conflict (document_id, ordinal) do nothing
+                        returning id
                         """,
                         (document_id, chunk.ordinal, chunk.content, to_pgvector(vector), Jsonb(chunk_meta)),
                     )
+                    if extract:
+                        row = cur.fetchone()
+                        if row:
+                            chunk_pairs.append((chunk, str(row["id"])))
 
-    return {"ok": True, "status": "ingested", "document_id": str(document_id), "file_hash": file_hash,
-            "pages": page_count, "chunks": len(chunks), "embeddings": len(embeddings),
-            "embedding_model": model, "domain": domain}
+    result = {"ok": True, "status": "ingested", "document_id": str(document_id), "file_hash": file_hash,
+              "pages": page_count, "chunks": len(chunks), "embeddings": len(embeddings),
+              "embedding_model": model, "domain": domain}
+
+    # Extraction MemGraphRAG APRÈS le commit du stockage : un échec d'extraction ne fait
+    # jamais perdre les chunks déjà stockés (les passages/faits sont ajoutés en plus).
+    if extract:
+        result["memgraph"] = _extract_chunks_to_memgraph(
+            chunk_pairs, str(document_id), detect_conflicts=detect_conflicts
+        )
+    return result
 
 
 def _walk_pdfs(root: Path, excludes: set[str], max_file_mb: int) -> tuple[list[Path], int]:
@@ -223,8 +270,13 @@ def ingest_folder(
     dry_run: bool = False,
     report_path: str | Path | None = None,
     post_embed_delay: float = 0.0,
+    extract: bool = False,
+    detect_conflicts: bool = False,
 ) -> dict[str, Any]:
-    """Ingère récursivement un dossier de PDF dans `zora`. Erreurs isolées par fichier."""
+    """Ingère récursivement un dossier de PDF dans `zora`. Erreurs isolées par fichier.
+
+    Si `extract`, chaque document alimente aussi MemGraphRAG (entités/faits/passages) via le LLM.
+    """
     root = Path(root)
     excludes = {e.upper() for e in (excludes or DEFAULT_EXCLUDES)}
     embedder = get_embedder()
@@ -242,6 +294,17 @@ def ingest_folder(
                 "ok": False, "error": health.get("error"), "provider_health": health,
                 "total_found": 0, "ingested": 0, "skipped": 0, "failed": 0, "details": [],
             }
+        # Si extraction demandée, le LLM doit répondre lui aussi (sinon échec rapide).
+        if extract:
+            from app.services.ingestion_pipeline import IngestionPipeline
+
+            if not IngestionPipeline().configured():
+                logger.error("Extraction demandée mais LLM non configuré")
+                return {
+                    "root": str(root), "dry_run": dry_run, "status": "llm_unhealthy",
+                    "ok": False, "error": "extraction demandée mais LLM (extraction_model) non configuré",
+                    "total_found": 0, "ingested": 0, "skipped": 0, "failed": 0, "details": [],
+                }
 
     pdfs, oversize = _walk_pdfs(root, excludes, max_file_mb)
     if limit:
@@ -251,7 +314,7 @@ def ingest_folder(
         "root": str(root), "dry_run": dry_run, "started_at": datetime.now(timezone.utc).isoformat(),
         "total_found": len(pdfs), "skipped_oversize": oversize,
         "ingested": 0, "skipped": 0, "failed": 0, "dry_run_count": 0,
-        "total_chunks": 0, "details": [],
+        "total_chunks": 0, "total_entities": 0, "total_facts": 0, "extract": extract, "details": [],
     }
 
     for index, fp in enumerate(pdfs, 1):
@@ -259,7 +322,7 @@ def ingest_folder(
         try:
             result = ingest_pdf_file(
                 fp, domain, dry_run=dry_run, max_pages=max_pages, embedder=embedder,
-                post_embed_delay=post_embed_delay
+                post_embed_delay=post_embed_delay, extract=extract, detect_conflicts=detect_conflicts,
             )
         except Exception as exc:  # noqa: BLE001 - isolation stricte par fichier
             result = {"ok": False, "status": "failed", "error": f"{type(exc).__name__}: {exc}"}
@@ -270,6 +333,9 @@ def ingest_folder(
         else:
             summary[status] = summary.get(status, 0) + 1
         summary["total_chunks"] += int(result.get("chunks") or 0)
+        mg = result.get("memgraph") or {}
+        summary["total_entities"] += int(mg.get("entities") or 0)
+        summary["total_facts"] += int(mg.get("facts") or 0)
         summary["details"].append({"file": str(fp), "domain": domain,
                                    **{k: v for k, v in result.items() if k != "ok"}})
         logger.info("[%d/%d] %s -> %s", index, len(pdfs), fp.name, status)

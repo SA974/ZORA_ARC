@@ -28,6 +28,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-file-mb", type=int, default=100)
     parser.add_argument("--delay", type=float, default=0.0, help="délai (s) après chaque embedding API (pour free endpoints)")
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--extract", action="store_true",
+                        help="alimente aussi MemGraphRAG (entités/faits/passages) via le LLM (plus lent)")
+    parser.add_argument("--detect-conflicts", action="store_true",
+                        help="active la détection de conflits temporels (avec --extract)")
     parser.add_argument("--report", default=None, help="chemin du rapport JSON")
     args = parser.parse_args(argv)
 
@@ -41,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         dry_run=args.dry_run,
         report_path=args.report,
         post_embed_delay=args.delay,
+        extract=args.extract,
+        detect_conflicts=args.detect_conflicts,
     )
     print(json.dumps({k: v for k, v in summary.items() if k != "details"}, indent=2, ensure_ascii=False))
     return 0 if summary["failed"] == 0 else 1
