@@ -3,19 +3,21 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.services.conflict_service import ConflictService
 from app.services.embedding_service import EmbeddingService, to_pgvector
 from app.services.extraction_service import ExtractionService
 from app.services.memgraph_service import MemGraphService
+from app.services.schema_gating import SchemaGatingService
 from app.services.temporal_service import TemporalService
 
 logger = logging.getLogger(__name__)
 
 
 class IngestionPipeline:
-    """Chaîne MemGraphRAG : texte -> passage -> entités -> faits (triplets) -> bridges -> (conflits).
+    """Chaîne MemGraphRAG : texte -> passage -> entités -> faits (triplets) -> bridges -> (conflits/gating).
 
-    detect_conflicts est OPT-IN : la supersession temporelle automatique peut écraser à tort
-    des faits multivalués. On préfère stocker, puis lancer la détection explicitement.
+    Intégré : #3 détection multi-type de conflits (temporel, mutuellement exclusif, granularité)
+    avec résolution evidence-driven, et #4 gating de schéma par fréquence (candidate→stable).
     """
 
     def __init__(self) -> None:
@@ -23,6 +25,8 @@ class IngestionPipeline:
         self.memgraph = MemGraphService()
         self.temporal = TemporalService()
         self.embedder = EmbeddingService()
+        self.conflicts = ConflictService()
+        self.schema_gating = SchemaGatingService()
 
     def configured(self) -> bool:
         return self.extractor.configured()
@@ -72,6 +76,7 @@ class IngestionPipeline:
                     entity_ids.append(str(row["id"]))
 
         # Faits : add_fact gère embedding + champs temporels.
+        # #4 Gating : enregistrer l'utilisation du schéma (basé sur le prédicat).
         fact_ids: list[str] = []
         conflicts: list[dict[str, Any]] = []
         for f in facts:
@@ -80,9 +85,15 @@ class IngestionPipeline:
             except (TypeError, ValueError):
                 conf = 0.5
             conf = max(0.0, min(1.0, conf))
+
+            predicate = str(f["predicate"])
+            # Enregistrer l'usage du schéma (basé sur le prédicat)
+            schema_info = self.schema_gating.register_schema_usage(predicate)
+            is_stable = schema_info.get("status") == "stable"
+
             fact = self.temporal.add_fact(
                 subject=str(f["subject"]),
-                predicate=str(f["predicate"]),
+                predicate=predicate,
                 object_value=str(f["object"]),
                 provenance_text=text[:1000],
                 source_document_id=source_document_id,
@@ -92,12 +103,19 @@ class IngestionPipeline:
             )
             fid = str(fact["id"])
             fact_ids.append(fid)
-            self.memgraph.link_fact_to_passage(fid, passage_id)
-            if detect_conflicts:
-                try:
-                    conflicts.extend(self.temporal.detect_temporal_conflict(fid).get("conflicts", []))
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("détection de conflit ignorée pour %s: %s", fid, type(exc).__name__)
+
+            # Lier au passage seulement si schéma stable (gating)
+            if is_stable:
+                self.memgraph.link_fact_to_passage(fid, passage_id)
+                if detect_conflicts:
+                    try:
+                        # #3 Détection multi-type de conflits
+                        conf_result = self.conflicts.detect_conflicts(fid)
+                        conflicts.extend(conf_result.get("conflicts", []))
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("détection de conflit ignorée pour %s: %s", fid, type(exc).__name__)
+            else:
+                logger.debug(f"fait {fid} (prédicat {predicate!r}) non lié : schéma candidate (freq={schema_info.get('frequency')}/3)")
 
         # Indexation H-MEM (hiérarchie domain -> entités/faits -> passage).
         # Best-effort : un échec H-MEM ne doit pas perdre l'extraction déjà stockée.
