@@ -17,7 +17,7 @@ from app.services.memgraph_service import MemGraphService
 
 logger = logging.getLogger(__name__)
 
-TOP_DOMAINS = 2  # nombre de domaines retenus à la couche racine du routage descendant
+TOP_DOMAINS = 3  # nombre de domaines retenus à la couche racine du routage descendant
 
 
 def score_candidate(
@@ -61,24 +61,35 @@ def _route_top_domains(cur, lit: str, k: int) -> list[dict[str, Any]]:
 
 
 def _facts_under_domains(cur, lit: str, domain_ids: list[str], limit: int) -> list[dict[str, Any]]:
-    """Couche faits : ne score QUE les faits atteignables depuis les domaines retenus
-    (élagage index-based) — `M^(fact) = ⋃_{d∈domaines} TopK_{f∈Child(d)} sim(q,f)`."""
+    """Couche faits : traversée récursive de la hiérarchie depuis les domaines retenus.
+
+    Parcourt toutes les arêtes `routes_to` (domain→theme→subtheme→fait) via CTE récursive,
+    puis sélectionne les nœuds de la couche `fact`.
+    `M^(fact) = ⋃_{d∈domaines} TopK_{f∈descendants(d)} sim(q,f)`
+    """
     cur.execute(
         """
+        with recursive reachable(node_id) as (
+            select id from hmem.memory_nodes where id = any(%s)
+            union
+            select e.target_node_id
+            from hmem.memory_edges e
+            join reachable r on r.node_id = e.source_node_id
+            where e.edge_type = 'routes_to'
+        )
         select f.id, f.subject, f.predicate, f.object_value,
                1 - (f.embedding <=> %s::vector) as similarity,
                coalesce(vaf.salience_now, f.salience, 1.0) as salience
-        from hmem.memory_nodes dn
-        join hmem.memory_edges e on e.source_node_id = dn.id and e.edge_type = 'routes_to'
-        join hmem.memory_nodes fn on fn.id = e.target_node_id and fn.layer_id = %s
+        from reachable r
+        join hmem.memory_nodes fn on fn.id = r.node_id and fn.layer_id = %s
         join memgraph.mem_facts f
           on fn.target_schema = 'memgraph' and fn.target_table = 'mem_facts' and fn.target_id = f.id
         left join memgraph.v_active_facts vaf on vaf.id = f.id
-        where dn.id = any(%s) and f.embedding is not null
+        where f.embedding is not null
         order by f.embedding <=> %s::vector
         limit %s
         """,
-        (lit, _layer_id("fact"), domain_ids, lit, limit),
+        (domain_ids, lit, _layer_id("fact"), lit, limit),
     )
     return [dict(r) for r in cur.fetchall()]
 

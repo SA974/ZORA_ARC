@@ -117,13 +117,20 @@ class IngestionPipeline:
             else:
                 logger.debug(f"fait {fid} (prédicat {predicate!r}) non lié : schéma candidate (freq={schema_info.get('frequency')}/3)")
 
-        # Indexation H-MEM (hiérarchie domain -> entités/faits -> passage).
-        # Best-effort : un échec H-MEM ne doit pas perdre l'extraction déjà stockée.
+        # Indexation H-MEM hiérarchique 4 niveaux (domain→theme→subtheme→fait/entité→passage).
+        # fact_predicates et entity_types alimentent les couches intermédiaires theme/subtheme.
         hmem = {"nodes": 0, "edges": 0}
         try:
             from app.services.hmem_builder import HMemBuilder
-
-            hmem = HMemBuilder().index_extraction(domain, passage_id, entity_ids, fact_ids)
+            fact_predicates = {str(fact_ids[i]): str(facts[i]["predicate"]) for i in range(len(fact_ids))} if facts else {}
+            entity_type_map = {}
+            for i, e in enumerate(entities):
+                if i < len(entity_ids):
+                    entity_type_map[entity_ids[i]] = str(e.get("type", "other") or "other")
+            hmem = HMemBuilder().index_extraction(
+                domain, passage_id, entity_ids, fact_ids,
+                fact_predicates=fact_predicates, entity_types=entity_type_map,
+            )
         except Exception as exc:  # noqa: BLE001
             logger.warning("indexation H-MEM ignorée pour passage %s: %s", passage_id, type(exc).__name__)
 

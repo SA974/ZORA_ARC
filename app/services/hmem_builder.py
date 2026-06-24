@@ -1,15 +1,17 @@
 """Peuplement de la mémoire hiérarchique H-MEM (hmem.memory_nodes / memory_edges).
 
-Construit, à partir d'une extraction MemGraphRAG, la hiérarchie navigable :
+Hiérarchie 4 niveaux (fidèle arXiv:2507.22925 — section/subsection/subsubsection/contenu) :
 
-    domain ──routes_to──> entité ─┐
-       │                          │
-       └────routes_to──> fait ──evidences──> passage
+    domain ──routes_to──> theme ──routes_to──> subtheme ──routes_to──> fait ──evidences──> passage
+                                                              │
+                                                        routes_to──> entité
 
-- `domain`  : nœud racine par domaine documentaire (agronomie, geographie_sante, …).
-- `entité`  : pointe vers memgraph.mem_entities.
-- `fait`    : pointe vers memgraph.mem_facts.
-- `passage` : pointe vers memgraph.mem_passages (preuve textuelle).
+- `domain`   : domaine documentaire (agronomie, geographie_sante, …).
+- `theme`    : catégorie sémantique dérivée du type d'entité dominant (person/org/place/concept/…).
+- `subtheme` : prédicat normalisé — regroupement de faits du même type de relation.
+- `fait`     : pointe vers memgraph.mem_facts.
+- `entité`   : pointe vers memgraph.mem_entities.
+- `passage`  : pointe vers memgraph.mem_passages (preuve textuelle).
 
 Déduplication par sélection-puis-insertion (pas de contrainte unique sur memory_nodes).
 Tout est fait dans UNE transaction par appel : cohérence ou rien.
@@ -45,6 +47,27 @@ def _domain_embedding(domain: str) -> str | None:
     return to_pgvector(vec) if vec is not None else None
 
 
+# Mapping entity_type → theme sémantique (fidèle au niveau "category" du papier H-MEM)
+_ENTITY_TYPE_TO_THEME: dict[str, str] = {
+    "person":  "acteurs",
+    "org":     "organisations",
+    "place":   "lieux_et_territoires",
+    "concept": "concepts_et_notions",
+    "product": "produits_et_technologies",
+    "date":    "temporalite",
+    "other":   "divers",
+}
+
+def _entity_type_to_theme(entity_type: str) -> str:
+    """Mappe un entity_type MemGraphRAG vers un thème H-MEM."""
+    return _ENTITY_TYPE_TO_THEME.get((entity_type or "other").lower(), "divers")
+
+def _predicate_to_subtheme(predicate: str) -> str:
+    """Normalise un prédicat en sous-thème (remplace les séparateurs, tronque à 40 car)."""
+    sub = predicate.lower().replace(" ", "_").replace("-", "_")
+    return sub[:40] if sub else "relation"
+
+
 class HMemBuilder:
     def index_extraction(
         self,
@@ -52,35 +75,72 @@ class HMemBuilder:
         passage_id: str,
         entity_ids: list[str],
         fact_ids: list[str],
+        *,
+        fact_predicates: dict[str, str] | None = None,
+        entity_types: dict[str, str] | None = None,
     ) -> dict[str, int]:
-        """Indexe une extraction dans H-MEM. Retourne le nombre de nœuds/arêtes créés."""
+        """Indexe une extraction dans H-MEM à 4 niveaux.
+
+        Hiérarchie : domain → theme → subtheme → fait/entité → passage.
+        fact_predicates : {fact_id: predicate} pour dériver les sous-thèmes.
+        entity_types    : {entity_id: entity_type} pour dériver les thèmes.
+        """
         created_nodes = 0
         created_edges = 0
+        fp = fact_predicates or {}
+        et = entity_types or {}
         dom_emb = _domain_embedding(domain)  # calculé hors transaction (appel réseau)
+
         with get_connection() as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
+                    # Niveau 1 : domaine
                     dom_node, c = self._ensure_label_node(cur, "domain", domain, embedding=dom_emb)
                     created_nodes += c
-                    pass_node, c = self._ensure_target_node(
-                        cur, "passage", "memgraph", "mem_passages", passage_id, label="passage"
-                    )
-                    created_nodes += c
 
+                    # Passage (feuille preuve — optionnel pour le backfill)
+                    pass_node = None
+                    if passage_id:
+                        pass_node, c = self._ensure_target_node(
+                            cur, "passage", "memgraph", "mem_passages", passage_id, label="passage"
+                        )
+                        created_nodes += c
+
+                    # Faits : domain → theme(prédicat) → subtheme(prédicat) → fait → passage
                     for fid in fact_ids:
+                        predicate = fp.get(fid, "relation")
+                        theme_lbl = _predicate_to_subtheme(predicate)   # theme = famille de prédicats
+                        subtheme_lbl = theme_lbl                         # subtheme = prédicat exact ici
+
+                        theme_node, c = self._ensure_label_node(cur, "theme", f"{domain}/{theme_lbl}")
+                        created_nodes += c
+                        created_edges += self._link(cur, dom_node, theme_node, "routes_to", 0.7)
+
+                        sub_node, c = self._ensure_label_node(cur, "subtheme", f"{domain}/{theme_lbl}/{subtheme_lbl}")
+                        created_nodes += c
+                        created_edges += self._link(cur, theme_node, sub_node, "routes_to", 0.8)
+
                         fnode, c = self._ensure_target_node(
                             cur, "fact", "memgraph", "mem_facts", fid, label="fact"
                         )
                         created_nodes += c
-                        created_edges += self._link(cur, dom_node, fnode, "routes_to", 0.5)
-                        created_edges += self._link(cur, fnode, pass_node, "evidences", 1.0)
+                        created_edges += self._link(cur, sub_node, fnode, "routes_to", 0.9)
+                        if pass_node:
+                            created_edges += self._link(cur, fnode, pass_node, "evidences", 1.0)
 
+                    # Entités : domain → theme(entity_type) → entité
                     for eid in entity_ids:
+                        etype = et.get(eid, "other")
+                        theme_lbl = _entity_type_to_theme(etype)
+                        theme_node, c = self._ensure_label_node(cur, "theme", f"{domain}/{theme_lbl}")
+                        created_nodes += c
+                        created_edges += self._link(cur, dom_node, theme_node, "routes_to", 0.7)
+
                         enode, c = self._ensure_target_node(
                             cur, "entity", "memgraph", "mem_entities", eid, label="entity"
                         )
                         created_nodes += c
-                        created_edges += self._link(cur, dom_node, enode, "routes_to", 0.4)
+                        created_edges += self._link(cur, theme_node, enode, "routes_to", 0.6)
 
         return {"nodes": created_nodes, "edges": created_edges}
 

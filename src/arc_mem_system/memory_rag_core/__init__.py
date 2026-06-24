@@ -10,8 +10,11 @@ from app.services.hmem_builder import HMemBuilder  # noqa: F401
 from app.services.hmem_retrieval import hmem_retrieve, score_candidate  # noqa: F401
 from app.services.hmem_router import HMemRouter  # noqa: F401
 
-# MemGraphRAG (extraction, graphe, conflits multi-types, gating de schéma, retrieval PPR conforme)
+# MemGraphRAG (extraction multi-agents, graphe, conflits, gating, PPR conforme)
 from app.services.conflict_service import ConflictService, ConflictType  # noqa: F401
+from app.services.extraction_agents import (  # noqa: F401
+    DetectionAgent, ExtractionAgent, MultiAgentExtractor, ResolutionAgent,
+)
 from app.services.extraction_service import ExtractionError, ExtractionService  # noqa: F401
 from app.services.memgraph_ppr import ppr_retrieve  # noqa: F401
 from app.services.memgraph_service import MemGraphService  # noqa: F401
@@ -22,4 +25,5 @@ __all__ = [
     "HMemBuilder", "hmem_retrieve", "score_candidate", "HMemRouter",
     "ExtractionService", "ExtractionError", "MemGraphService", "TemporalService",
     "ppr_retrieve", "ConflictService", "ConflictType", "SchemaGatingService",
+    "ExtractionAgent", "DetectionAgent", "ResolutionAgent", "MultiAgentExtractor",
 ]
