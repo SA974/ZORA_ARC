@@ -1,113 +1,144 @@
-# ZORA_ARC — ARC-MEM Bridge
+# ZORA_ARC
+## 1. Définition générale
 
-Couche d'intégration locale **100 % Ollama** reliant Hermes, Hindsight, MemGraphRAG,
-H-MEM et **PostgreSQL/PostGIS/pgvector** pour l'ingestion documentaire (PDF) et la
-mémoire RAG / graphe de connaissances.
+**ZORA ARC** est une architecture méthodologique conçue pour transformer une demande complexe, floue, sensible ou multi-projets en un **livrable structuré, sourcé, contrôlé et directement exploitable**.
 
-Architecture cible : `ZORA_ARC V9.2 ARC-MEM-H`.
+Son objectif n’est pas seulement de répondre à une question. Son objectif est plus profond : **organiser les conditions de validité de la réponse**.
 
-> ⚠️ **Sécurité.** Aucune clé/secret n'est versionné. Le `.env` réel est gitignoré ;
-> seul `.env.example` (sans valeurs sensibles) est publié. Ne committez jamais de clé.
+Autrement dit, ZORA ARC sert à éviter le passage trop rapide :
 
-## Principes
-
-- **Ollama** est le provider unique (génération + embeddings). Pas de NVIDIA NIM, pas d'OpenRouter.
-- **PostgreSQL/pgvector** est la base centrale ; embeddings en **768 D** (`nomic-embed-text`).
-- Écritures importantes **transactionnelles** (atomicité, reprise propre).
-- Hindsight = mémoire agentique ; MemGraphRAG = mémoire graphe probatoire ; H-MEM = routage hiérarchique.
-
-## Pile technique
-
-| Domaine | Choix |
-|---|---|
-| Lecture PDF | PyMuPDF (`fitz`) |
-| OCR (optionnel) | PaddleOCR (lazy, `ENABLE_OCR=1`) |
-| Embeddings | Ollama `nomic-embed-text` (768 D) |
-| LLM | Ollama `qwen:14b` |
-| Base | PostgreSQL 18 + PostGIS + pgvector + pg_trgm + pgcrypto |
-| Accès DB | psycopg 3 |
-| API | FastAPI + Uvicorn |
-| Config | pydantic-settings |
-| Tests | pytest |
-
-## Prérequis
-
-- Python ≥ 3.11
-- PostgreSQL 16+ avec extensions `vector`, `postgis`, `pg_trgm`, `pgcrypto`
-- [Ollama](https://ollama.com) installé et démarré
-
-## Installation
-
-```bash
-# 1. Environnement virtuel
-python -m venv .venv
-# Windows : .venv\Scripts\Activate.ps1   |   Linux/macOS : source .venv/bin/activate
-
-# 2. Dépendances
-pip install -r requirements.txt
-
-# 3. Configuration
-cp .env.example .env      # puis éditer .env
-
-# 4. Modèles Ollama
-ollama pull nomic-embed-text     # embeddings 768 D
-ollama pull qwen:14b             # génération / extraction
+```text
+Question → Réponse immédiate
 ```
 
-## Base de données
+et à le remplacer par une chaîne plus robuste :
 
-```bash
-# Migrations versionnées (idempotentes, transactionnelles)
-python scripts/apply_migrations.py --dry-run     # aperçu
-python scripts/apply_migrations.py               # applique les migrations en attente
-# Sur une base DÉJÀ migrée, adopter le registre sans réexécuter :
-python scripts/apply_migrations.py --baseline
+```text
+Demande → Cadrage → Qualification → Plan → Preuves → Rédaction → Audit → Correction → Livraison
 ```
 
-Schéma : `zora` (documents, chunks, evidence…), `memgraph` (entités, faits, passages,
-conflits, couche temporelle), `hmem` (mémoire hiérarchique).
+ZORA ARC est donc à la fois :
 
-## Healthcheck
+* une méthode de cadrage ;
+* un système d’analyse ;
+* un routeur de complexité ;
+* un dispositif d’audit ;
+* un outil de production de livrables ;
+* une architecture de sécurisation des tâches complexes.
 
-```bash
-python scripts/check_postgres.py        # connexion + extensions
-# /health (API) renvoie postgres + ollama + hindsight
-```
+---
 
-## Ingestion PDF
+# 2. Objectif central
 
-```bash
-# Dossier récursif -> zora (embeddings 768 D, transactionnel, dédup par hash)
-python scripts/ingest_folder.py "/chemin/vers/pdfs" --report ingestion.json
-python scripts/ingest_folder.py "/chemin/vers/pdfs" --dry-run --limit 5
-```
+L’objectif central de ZORA ARC est de transformer une tâche incertaine en un objet de travail clair.
 
-Pipeline : scan → extraction texte → nettoyage → chunking → `content_chars` /
-`content_tokens_estimated` → embeddings → stockage pgvector. Un **preflight** vérifie
-qu'Ollama répond et renvoie la bonne dimension *avant* de traiter le lot.
+Il permet de répondre à cinq problèmes fréquents :
 
-## API
+| Problème              | Réponse apportée par ZORA ARC             |
+| --------------------- | ----------------------------------------- |
+| Demande floue         | Cadrage par TASKCARD                      |
+| Tâche complexe        | Qualification par routeur                 |
+| Risque d’erreur       | Gates d’audit                             |
+| Manque de preuves     | Module registre de preuves                |
+| Livrable inutilisable | Plan opératoire et contrôle d’opérabilité |
 
-```bash
-uvicorn app.main:app --host 127.0.0.1 --port 8791
-# GET /health  •  POST /ingest/pdf  •  POST /ingest/folder  •  POST /retrieve  ...
-```
+La formule simple serait :
 
-## Tests & validation
+> **ZORA ARC transforme le flou en structure, la structure en analyse, l’analyse en livrable, et le livrable en décision exploitable.**
 
-```bash
-pytest app/tests -q                       # tests unitaires/intégration
-python scripts/validate_lots_0_2.py       # validation Ollama / PostgreSQL / PDF
-python scripts/validate_lot3.py           # validation robustesse (preflight, health)
-```
+---
 
-## Définition de `content_length`
+# 3. Problème de fond que ZORA ARC cherche à résoudre
 
-Volontairement **deux champs** distincts (colonnes générées dans `zora.chunks`) :
+Dans les tâches complexes, le danger principal n’est pas seulement de se tromper.
+Le danger est de produire une réponse qui **semble solide**, mais qui ne l’est pas.
 
-- `content_chars` — nombre de **caractères** Unicode ;
-- `content_tokens_estimated` — **tokens** estimés (≈ `caractères / 4`).
+ZORA ARC lutte donc contre :
 
-## Licence
+* le faux robuste ;
+* les réponses trop rapides ;
+* les synthèses sans preuves ;
+* les plans non opératoires ;
+* les recommandations non vérifiables ;
+* les erreurs de périmètre ;
+* les confusions entre information, preuve, hypothèse et décision ;
+* les livrables trop beaux mais inutilisables.
 
-À définir par le propriétaire du dépôt.
+C’est pour cela que ZORA ARC impose une logique progressive :
+
+```text
+Cadrer avant d’analyser.
+Qualifier avant d’activer.
+Documenter avant d’affirmer.
+Auditer avant de livrer.
+Corriger avant de conclure.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│                         ZORA_ARC V9.1 — ARC-MEM                             │
+│        RAG spatial, vectoriel, probatoire et auditable sous PostgreSQL        │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+        1. ENTRÉE STRUCTURÉE
+        ┌────────────────────┐
+        │ Question utilisateur│
+        └─────────┬──────────┘
+                  ↓
+        ┌────────────────────┐
+        │ TASKCARD + Score   │
+        └─────────┬──────────┘
+                  ↓
+        ┌────────────────────┐
+        │ Routeur ARC : SR   │
+        └─────────┬──────────┘
+                  ↓
+
+        2. MODULES ARC
+        ┌────────────────────────────────────────────────────┐
+        │ M1 PARA │ M2 Résumé │ M3 Complexité │ M4 Preuves   │
+        │ M5 Réglementaire │ M6 Scientifique │ M7 Spatial   │
+        │ M8 RAG documentaire                              │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+
+        3. BASE CENTRALE POSTGRESQL
+        ┌────────────────────────────────────────────────────┐
+        │ PostgreSQL                                         │
+        │ ├─ PostGIS    : lieux, distances, territoires      │
+        │ ├─ pgvector   : embeddings, similarité             │
+        │ ├─ mem_types / mem_entities                        │
+        │ ├─ mem_schemas / mem_facts                         │
+        │ ├─ chunks / mem_fact_chunks                        │
+        │ ├─ mem_bridges                                    │
+        │ ├─ taskcards                                      │
+        │ └─ arc_audit_log                                  │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+
+        4. MÉMOIRE ARC-MEM
+        ┌────────────────────────────────────────────────────┐
+        │ L1 Ontologie : types, schémas, règles              │
+        │ L2 Faits     : triplets, relations, validités      │
+        │ L3 Passages  : textes sources, preuves             │
+        │ L4 Geo-RAG   : position, échelle, temps, contexte  │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+
+        5. RETRIEVAL + AUDIT
+        ┌────────────────────────────────────────────────────┐
+        │ Python externe : Personalized PageRank             │
+        │ Gates : G0 Format, G1 Preuves, G2 Cohérence,       │
+        │         G3 Risques, G4 Réplicabilité               │
+        │ PATCH si erreur                                    │
+        └──────────────────────────┬─────────────────────────┘
+                                   ↓
+        ┌────────────────────────────────────────────────────┐
+        │ Réponse finale : sourcée, auditée, corrigée,       │
+        │ exploitable par Stéphane, Zora ou Codex            │
+        └──────────────────────────────────────────────────
+
+---
+
+## Mise en route (implémentation locale, 100 % Ollama)
+
+Le guide d'installation, de configuration Ollama, de migrations PostgreSQL/pgvector,
+d'ingestion PDF et de tests se trouve dans **[docs/QUICKSTART.md](docs/QUICKSTART.md)**.
