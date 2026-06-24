@@ -92,7 +92,8 @@ def _already_ingested(file_hash: str) -> str | None:
 
 
 def _extract_chunks_to_memgraph(
-    chunk_pairs: list[tuple[Any, str]], document_id: str, *, detect_conflicts: bool = False
+    chunk_pairs: list[tuple[Any, str]], document_id: str, *,
+    domain: str = "bibliotheque", detect_conflicts: bool = False
 ) -> dict[str, Any]:
     """Lance l'extraction MemGraphRAG (entités/faits/passages) chunk par chunk.
 
@@ -110,7 +111,7 @@ def _extract_chunks_to_memgraph(
         try:
             res = pipeline.extract_and_store(
                 chunk.content, source_document_id=document_id, source_chunk_id=chunk_id,
-                detect_conflicts=detect_conflicts,
+                detect_conflicts=detect_conflicts, domain=domain,
             )
             entities += res["entities"]
             facts += res["facts"]
@@ -230,7 +231,7 @@ def ingest_pdf_file(
     # jamais perdre les chunks déjà stockés (les passages/faits sont ajoutés en plus).
     if extract:
         result["memgraph"] = _extract_chunks_to_memgraph(
-            chunk_pairs, str(document_id), detect_conflicts=detect_conflicts
+            chunk_pairs, str(document_id), domain=domain, detect_conflicts=detect_conflicts
         )
     return result
 

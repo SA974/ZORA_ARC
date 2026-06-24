@@ -35,6 +35,7 @@ class IngestionPipeline:
         observed_at: str | None = None,
         detect_conflicts: bool = False,
         passage_metadata: dict[str, Any] | None = None,
+        domain: str = "bibliotheque",
     ) -> dict[str, Any]:
         result = self.extractor.extract(text)
         entities = result["entities"]
@@ -98,6 +99,16 @@ class IngestionPipeline:
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("détection de conflit ignorée pour %s: %s", fid, type(exc).__name__)
 
+        # Indexation H-MEM (hiérarchie domain -> entités/faits -> passage).
+        # Best-effort : un échec H-MEM ne doit pas perdre l'extraction déjà stockée.
+        hmem = {"nodes": 0, "edges": 0}
+        try:
+            from app.services.hmem_builder import HMemBuilder
+
+            hmem = HMemBuilder().index_extraction(domain, passage_id, entity_ids, fact_ids)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("indexation H-MEM ignorée pour passage %s: %s", passage_id, type(exc).__name__)
+
         return {
             "ok": True,
             "passage_id": passage_id,
@@ -105,4 +116,5 @@ class IngestionPipeline:
             "facts": len(fact_ids),
             "fact_ids": fact_ids,
             "conflicts": conflicts,
+            "hmem": hmem,
         }

@@ -19,7 +19,8 @@ class _FakePipeline:
     def configured(self):
         return self._configured
 
-    def extract_and_store(self, content, *, source_document_id=None, source_chunk_id=None, detect_conflicts=False):
+    def extract_and_store(self, content, *, source_document_id=None, source_chunk_id=None,
+                          detect_conflicts=False, domain="bibliotheque"):
         if self._fail_on and source_chunk_id == self._fail_on:
             raise RuntimeError("LLM timeout simulé")
         return {"entities": 2, "facts": 3, "conflicts": [{"x": 1}]}
