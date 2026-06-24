@@ -4,9 +4,11 @@
 *.log
 *.pid
 backup_before_cleanup_*/
+cleanup_archive_*/
 *.backup-*
 _audit_*.py
 _backup_dir.txt
+_last_cleanup_archive.txt
 # Artefacts de build LaTeX (docs/)
 docs/*.aux
 docs/*.out

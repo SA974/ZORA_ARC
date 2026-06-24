@@ -6,7 +6,7 @@ Phase C : verification.
 """
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.db import get_connection
 from app.services.embedding_service_ollama import EmbeddingServiceOllama
 from app.services.embedding_service import to_pgvector
