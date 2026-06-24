@@ -1,0 +1,81 @@
+{
+  "timestamp": "2026-06-24T21:45:39.281676",
+  "total_pdfs": 12,
+  "processed": 12,
+  "skipped": 0,
+  "errors": 0,
+  "results": [
+    {
+      "file": "Acceptabil.pdf",
+      "status": "success",
+      "doc_id": "971d3dab-f482-4a60-a0ba-8ba9ee81b403",
+      "memgraph": null
+    },
+    {
+      "file": "agricultur.pdf",
+      "status": "success",
+      "doc_id": "60841a95-7ad6-4296-a48d-ec755f9c4808",
+      "memgraph": null
+    },
+    {
+      "file": "anthro_med.pdf",
+      "status": "success",
+      "doc_id": "a41e172a-6b23-4fbe-80a0-81b50a3ae523",
+      "memgraph": null
+    },
+    {
+      "file": "developpem.pdf",
+      "status": "success",
+      "doc_id": "7b582fa9-9377-4134-8fb2-94e3856d842d",
+      "memgraph": null
+    },
+    {
+      "file": "gpl11_comp.pdf",
+      "status": "success",
+      "doc_id": "acc72355-7cea-40c3-9141-6edfd5f4e709",
+      "memgraph": null
+    },
+    {
+      "file": "hindouisme.pdf",
+      "status": "success",
+      "doc_id": "5099099c-eeb6-429b-b9ff-f6dda3907de6",
+      "memgraph": null
+    },
+    {
+      "file": "Laconstruc.pdf",
+      "status": "success",
+      "doc_id": "eebf3a1f-eec7-46b7-bd65-acadb6fbf0ef",
+      "memgraph": null
+    },
+    {
+      "file": "pourchez20.pdf",
+      "status": "success",
+      "doc_id": "42af2037-544a-4c78-81bb-5d59b2444621",
+      "memgraph": null
+    },
+    {
+      "file": "religion_h.pdf",
+      "status": "success",
+      "doc_id": "abf97600-7fbc-4ae0-a63e-8c7ef6de968d",
+      "memgraph": null
+    },
+    {
+      "file": "remotesens.pdf",
+      "status": "success",
+      "doc_id": "90592d28-97b1-48ff-b5b1-ded9e3f1491f",
+      "memgraph": null
+    },
+    {
+      "file": "soigner_au.pdf",
+      "status": "success",
+      "doc_id": "69d1e29f-ffe4-41a6-804a-5a7c588e2e2b",
+      "memgraph": null
+    },
+    {
+      "file": "Tanbav_sen.pdf",
+      "status": "success",
+      "doc_id": "73be4957-f266-46e5-b2f9-8321971af528",
+      "memgraph": null
+    }
+  ]
+}
