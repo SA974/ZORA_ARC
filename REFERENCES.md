@@ -52,6 +52,46 @@ similarité d'embedding et Personalized PageRank — implémentés ici dans
 
 ---
 
+## Fondations conceptuelles — Pensée complexe, systèmes et résilience
+
+> **De la révolution du complexe à la pensée du complexe**
+> Janine Guespin-Michel. Mai 2018. Creative Commons.
+> http://penseeducomplexe.free.fr
+
+Inspire l'approche **holistique** de l'architecture ZORA_ARC : la mémoire comme système
+complexe auto-organisé, où les faits/entités/passages forment des patrons interconnectés
+plutôt que des structures arborescentes rigides.
+
+> **Approche de la résilience et perturbations des systèmes complexes par une évaluation globale**
+> Véronique Thomas-Vaslin, Frédéric Jacquemart.
+> (Global evaluation of the resilience and perturbations of complex systems)
+
+Cadre pour évaluer la robustesse du graphe MemGraphRAG sous conflits temporels et
+perturbations d'extraction (feedback, supersession).
+
+> **Extended Criticality, Phase Spaces and Enablement in Biology**
+> Longo, G., Montévil, M. (2013). *Chaos, Soliton and Fractals*, 55, 64-79.
+> DOI: 10.1016/j.chaos.2013.07.001
+
+Notion d'**espaces de phase** appliquée au retrieval hiérarchique : la requête navigue dans un
+espace latent de domaines/faits/passages, structuré par les transitions (arêtes H-MEM).
+
+> **Man and His Environment: Biomedical Knowledge and Social Action**
+> René Dubos. 1966.
+
+Perspective écologique sur l'intégration de la connaissance humaine dans les systèmes
+informatiques — ZORA_ARC comme un *environnement* où les mémoires et faits coévoluent.
+
+> **René Dubos, Tuberculosis, and the Ecological Facets of Virulence**
+> Mark Honigsbaum. *HPLS* (2017), 39:15.
+> DOI: 10.1007/s40656-017-0142-51
+
+Application historique de la pensée écologique et contextuelle à la maladie
+(Dubos/Rickettsias) : modèle d'une connaissance qui reflète les **contextes** plutôt que les
+*essences* — analogie avec les faits MemGraphRAG, validés par leurs passages de provenance.
+
+---
+
 > Note : cette implémentation diverge des papiers sur certains points (routage index-based
 > H-MEM, PPR conforme, types de conflits, gating de schéma) — voir la feuille de route
 > interne de mise à niveau. Les choix d'ingénierie (ex. formule de décroissance temporelle)
