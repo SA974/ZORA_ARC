@@ -4,6 +4,7 @@ from fastapi import FastAPI
 
 from app.api import audit, facts, health, ingest, memory, retrieve
 from app.logging_config import configure_logging
+from app.routes import monitoring
 
 configure_logging()
 
@@ -19,3 +20,4 @@ app.include_router(ingest.router)
 app.include_router(retrieve.router)
 app.include_router(audit.router)
 app.include_router(facts.router)
+app.include_router(monitoring.router)
