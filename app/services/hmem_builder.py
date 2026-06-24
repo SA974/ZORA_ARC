@@ -22,6 +22,7 @@ from functools import lru_cache
 from psycopg.types.json import Jsonb
 
 from app.db import get_connection
+from app.services.embedding_service import EmbeddingService, to_pgvector
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,14 @@ def _layer_id(name: str) -> str:
         return str(row["id"])
 
 
+@lru_cache(maxsize=64)
+def _domain_embedding(domain: str) -> str | None:
+    """Embedding (littéral pgvector) du libellé de domaine, pour le routage index-based.
+    Mis en cache par domaine ; None si l'embedder est indisponible (routage -> repli plat)."""
+    vec = EmbeddingService().try_embed_query(domain)
+    return to_pgvector(vec) if vec is not None else None
+
+
 class HMemBuilder:
     def index_extraction(
         self,
@@ -47,10 +56,11 @@ class HMemBuilder:
         """Indexe une extraction dans H-MEM. Retourne le nombre de nœuds/arêtes créés."""
         created_nodes = 0
         created_edges = 0
+        dom_emb = _domain_embedding(domain)  # calculé hors transaction (appel réseau)
         with get_connection() as conn:
             with conn.transaction():
                 with conn.cursor() as cur:
-                    dom_node, c = self._ensure_label_node(cur, "domain", domain)
+                    dom_node, c = self._ensure_label_node(cur, "domain", domain, embedding=dom_emb)
                     created_nodes += c
                     pass_node, c = self._ensure_target_node(
                         cur, "passage", "memgraph", "mem_passages", passage_id, label="passage"
@@ -76,20 +86,28 @@ class HMemBuilder:
 
     # --- helpers ---------------------------------------------------------------
 
-    def _ensure_label_node(self, cur, layer: str, label: str) -> tuple[str, int]:
-        """Nœud sans cible (domaine/thème), dédupliqué par (layer, label)."""
+    def _ensure_label_node(self, cur, layer: str, label: str, *, embedding: str | None = None) -> tuple[str, int]:
+        """Nœud sans cible (domaine/thème), dédupliqué par (layer, label).
+
+        `embedding` (littéral pgvector) alimente le routage index-based ; backfillé si le
+        nœud existait sans embedding.
+        """
         lid = _layer_id(layer)
         cur.execute(
-            "select id from hmem.memory_nodes where layer_id=%s and label=%s "
+            "select id, embedding from hmem.memory_nodes where layer_id=%s and label=%s "
             "and target_id is null limit 1",
             (lid, label),
         )
         row = cur.fetchone()
         if row:
+            if embedding is not None and row["embedding"] is None:
+                cur.execute("update hmem.memory_nodes set embedding=%s::vector where id=%s",
+                            (embedding, str(row["id"])))
             return str(row["id"]), 0
         cur.execute(
-            "insert into hmem.memory_nodes(layer_id, label, metadata) values (%s, %s, %s::jsonb) returning id",
-            (lid, label, Jsonb({"origin": "hmem_builder"})),
+            "insert into hmem.memory_nodes(layer_id, label, metadata, embedding) "
+            "values (%s, %s, %s::jsonb, %s::vector) returning id",
+            (lid, label, Jsonb({"origin": "hmem_builder"}), embedding),
         )
         return str(cur.fetchone()["id"]), 1
 

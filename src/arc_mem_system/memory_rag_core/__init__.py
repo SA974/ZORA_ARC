@@ -5,17 +5,19 @@ entités / faits / passages / conflits MemGraphRAG, scoring.
 """
 from __future__ import annotations
 
-# H-MEM
+# H-MEM (routage index-based + scoring)
 from app.services.hmem_builder import HMemBuilder  # noqa: F401
 from app.services.hmem_retrieval import hmem_retrieve, score_candidate  # noqa: F401
 from app.services.hmem_router import HMemRouter  # noqa: F401
 
-# MemGraphRAG
+# MemGraphRAG (extraction, graphe, conflits temporels, retrieval PPR conforme)
 from app.services.extraction_service import ExtractionError, ExtractionService  # noqa: F401
+from app.services.memgraph_ppr import ppr_retrieve  # noqa: F401
 from app.services.memgraph_service import MemGraphService  # noqa: F401
 from app.services.temporal_service import TemporalService  # noqa: F401
 
 __all__ = [
     "HMemBuilder", "hmem_retrieve", "score_candidate", "HMemRouter",
     "ExtractionService", "ExtractionError", "MemGraphService", "TemporalService",
+    "ppr_retrieve",
 ]
