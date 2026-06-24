@@ -1,0 +1,514 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{fancyhdr}
+
+\geometry{margin=2.3cm}
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  pdftitle={ARC-MEM Bridge v0.1 - Architecture et tutoriel},
+  pdfauthor={ARC-MEM Bridge}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{ARC-MEM Bridge v0.1}
+\rhead{ZORA\_ARC V9.2 ARC-MEM-H}
+\cfoot{\thepage}
+
+\lstdefinestyle{console}{
+  basicstyle=\ttfamily\small,
+  breaklines=true,
+  frame=single,
+  backgroundcolor=\color{gray!6},
+  columns=fullflexible
+}
+\lstset{style=console}
+
+\title{\textbf{ARC-MEM Bridge v0.1}\\Architecture du système et tutoriel de fonctionnement}
+\author{Architecture cible : ZORA\_ARC V9.2 ARC-MEM-H}
+\date{13 juin 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+ARC-MEM Bridge est une couche locale d'intégration entre Hermes Desktop, Hindsight,
+MemGraphRAG, H-MEM, PostgreSQL/PostGIS/pgvector et un moteur Python FastAPI. Ce
+document décrit l'architecture, la séparation des responsabilités, les flux de
+fonctionnement, les schémas PostgreSQL, les commandes d'exploitation et un tutoriel
+pratique pour diagnostiquer, démarrer, ingérer, récupérer et auditer la mémoire.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Objectif du système}
+
+ARC-MEM Bridge sert de pont logique local entre les composants de mémoire et
+d'orchestration. Il ne remplace ni Hermes, ni Hindsight, ni MemGraphRAG. Il fournit
+une API locale, une CLI et des services Python pour unifier l'accès aux mémoires,
+contrôler la provenance et appliquer la gouvernance ZORA ARC.
+
+\subsection{Objectifs principaux}
+
+\begin{itemize}[leftmargin=*]
+  \item connecter proprement PostgreSQL depuis WSL ;
+  \item garder Hindsight comme mémoire agentique persistante ;
+  \item garder MemGraphRAG comme mémoire documentaire probatoire ;
+  \item utiliser H-MEM comme routeur hiérarchique, sans base séparée ;
+  \item exposer une API locale pour Hermes ;
+  \item appliquer des contrôles ZORA ARC : TASKCARD, preuve, audit, gates ;
+  \item éviter toute fuite de secrets dans les logs, tests et documentation.
+\end{itemize}
+
+\section{Vue d'ensemble}
+
+\begin{verbatim}
+                 +----------------------+
+                 |    Hermes Desktop    |
+                 | Interface agentique  |
+                 +----------+-----------+
+                            |
+                            | API locale / CLI
+                            v
+                 +----------------------+
+                 |   ARC-MEM Bridge     |
+                 | FastAPI + services   |
+                 +----+------+-----+----+
+                      |      |     |
+      +---------------+      |     +----------------+
+      |                      |                      |
+      v                      v                      v
++-------------+     +----------------+      +----------------+
+| Hindsight   |     | MemGraphRAG    |      | H-MEM Router   |
+| agentique   |     | documentaire   |      | hierarchique   |
+| PostgreSQL  |     | probatoire     |      | chemins memoire|
++------+------+     +-------+--------+      +-------+--------+
+       |                    |                       |
+       +--------------------+-----------------------+
+                            |
+                            v
+                +------------------------+
+                | PostgreSQL Windows 18  |
+                | PostGIS + pgvector     |
+                +------------------------+
+\end{verbatim}
+
+\section{Etat cible retenu}
+
+L'installation actuelle retient le mode \texttt{postgresql\_direct} pour Hindsight.
+Ce choix abandonne explicitement PostgreSQL embedded, qui est fragile sur Windows
+avec des locales regionales non ASCII.
+
+\begin{longtable}{|p{3.2cm}|p{11cm}|}
+\hline
+\textbf{Composant} & \textbf{Etat cible} \\
+\hline
+Hermes Desktop & Interface agent. Ne doit pas etre modifie brutalement. Les
+fichiers de configuration doivent etre sauvegardes avant toute modification. \\
+\hline
+Hindsight & Memoire agentique persistante en mode \texttt{postgresql\_direct}.
+Stocke preferences, decisions, contexte de travail et resumes intersessions dans
+\texttt{hindsight\_hermes}. \\
+\hline
+MemGraphRAG & Memoire documentaire probatoire dans les schemas ARC-MEM. Stocke
+documents, passages, entites, faits, relations, conflits et preuves. \\
+\hline
+H-MEM & Couche de routage hierarchique. Les niveaux sont \texttt{domain},
+\texttt{theme}, \texttt{subtheme}, \texttt{entity}, \texttt{fact},
+\texttt{passage}. \\
+\hline
+PostgreSQL & Serveur central Windows 18 accessible depuis WSL via
+\texttt{172.21.96.1:5432}. Extensions actives : \texttt{vector},
+\texttt{postgis}, \texttt{pg\_trgm}, \texttt{pgcrypto}. \\
+\hline
+ZORA ARC & Gouvernance methodologique : TASKCARD, score routeur, registre de
+preuves, audit, niveaux de criticite. \\
+\hline
+\end{longtable}
+
+\section{Separation stricte des responsabilites}
+
+\subsection{Hindsight}
+
+Hindsight reste reserve a la memoire agentique persistante :
+
+\begin{itemize}[leftmargin=*]
+  \item preferences utilisateur ;
+  \item decisions de projet ;
+  \item historique de travail ;
+  \item resumes intersessions ;
+  \item contexte Hermes ;
+  \item faits agentiques courts et recherchables.
+\end{itemize}
+
+Il ne doit pas recevoir les PDF complets ni les gros chunks documentaires. Dans
+l'etat actuel, Hindsight est connecte directement a PostgreSQL dans la base
+\texttt{hindsight\_hermes}. Le daemon Hindsight et PostgreSQL embedded ne sont
+pas necessaires pour cette voie.
+
+\subsection{MemGraphRAG}
+
+MemGraphRAG est reserve a la memoire documentaire probatoire :
+
+\begin{itemize}[leftmargin=*]
+  \item documents sources ;
+  \item chunks ;
+  \item passages ;
+  \item entites ;
+  \item faits documentaires ;
+  \item conflits ;
+  \item preuves et provenance.
+\end{itemize}
+
+La chaine de tracabilite visee est :
+
+\begin{center}
+\texttt{source -> chunk -> passage -> fait -> citation -> reponse}
+\end{center}
+
+\subsection{H-MEM}
+
+H-MEM ne cree pas une base de memoire parallele. Il route les requetes vers les
+bons niveaux d'abstraction et les bons objets. Les noeuds H-MEM peuvent pointer
+vers :
+
+\begin{itemize}[leftmargin=*]
+  \item \texttt{zora.documents} ;
+  \item \texttt{zora.chunks} ;
+  \item \texttt{memgraph.mem\_entities} ;
+  \item \texttt{memgraph.mem\_facts} ;
+  \item \texttt{memgraph.mem\_passages} ;
+  \item des souvenirs Hindsight par reference externe.
+\end{itemize}
+
+\section{Organisation PostgreSQL}
+
+\subsection{Bases}
+
+\begin{longtable}{|p{4cm}|p{10cm}|}
+\hline
+\textbf{Base} & \textbf{Role} \\
+\hline
+\texttt{rag\_arc} & Base ARC-MEM Bridge. Contient les schemas
+\texttt{zora}, \texttt{memgraph}, \texttt{hmem}. \\
+\hline
+\texttt{hindsight\_hermes} & Base Hindsight directe. Contient la memoire
+agentique deja migree : faits, sessions, entites, documents, memories. \\
+\hline
+\end{longtable}
+
+\subsection{Schemas ARC-MEM dans \texttt{rag\_arc}}
+
+\begin{longtable}{|p{3cm}|p{11cm}|}
+\hline
+\textbf{Schema} & \textbf{Tables principales} \\
+\hline
+\texttt{zora} & \texttt{taskcards}, \texttt{arc\_runs},
+\texttt{arc\_audit\_log}, \texttt{evidence\_registry},
+\texttt{documents}, \texttt{chunks}, \texttt{citations}. \\
+\hline
+\texttt{memgraph} & \texttt{mem\_schemas}, \texttt{mem\_entities},
+\texttt{mem\_facts}, \texttt{mem\_passages}, \texttt{mem\_bridges},
+\texttt{mem\_conflicts}, \texttt{v\_graphe\_ppr}. \\
+\hline
+\texttt{hmem} & \texttt{memory\_layers}, \texttt{memory\_nodes},
+\texttt{memory\_edges}, \texttt{positional\_indexes},
+\texttt{routing\_paths}. \\
+\hline
+\end{longtable}
+
+\section{Application Python}
+
+\subsection{Structure}
+
+\begin{lstlisting}
+arc-mem-bridge/
+  app/
+    main.py
+    config.py
+    db.py
+    api/
+      health.py
+      memory.py
+      ingest.py
+      retrieve.py
+      audit.py
+    services/
+      hindsight_client.py
+      memgraph_service.py
+      hmem_router.py
+      zora_arc_service.py
+      retrieval_service.py
+      ppr_service.py
+      hermes_bridge.py
+    migrations/
+      001_init_extensions.sql
+      002_init_zora_schema.sql
+      003_init_memgraph_schema.sql
+      004_init_hmem_schema.sql
+      005_views_and_indexes.sql
+    cli/
+      arc_mem.py
+  scripts/
+    check_postgres.py
+    apply_migrations.py
+    diagnose_hermes.py
+    diagnose_hindsight.py
+    smoke_test.py
+\end{lstlisting}
+
+\subsection{Routes API}
+
+\begin{longtable}{|p{4cm}|p{10cm}|}
+\hline
+\textbf{Route} & \textbf{Role} \\
+\hline
+\texttt{GET /health} & Retourne le statut de l'application, PostgreSQL,
+extensions et Hindsight. \\
+\hline
+\texttt{POST /memory/retain} & Retient un souvenir agentique dans Hindsight.
+En mode direct, insere dans \texttt{hindsight\_hermes.facts}. \\
+\hline
+\texttt{POST /memory/recall} & Recherche des souvenirs agentiques Hindsight. \\
+\hline
+\texttt{POST /ingest/document} & Enregistre un document dans \texttt{zora},
+le decoupe en chunks et prepare l'extraction probatoire. \\
+\hline
+\texttt{POST /retrieve} & Construit un paquet de contexte structure :
+TASKCARD, contexte Hindsight, chemins H-MEM, faits, passages, citations. \\
+\hline
+\texttt{POST /audit} & Verifie qu'une reponse proposee contient sources,
+citations, limites, risques et coherence avec la TASKCARD. \\
+\hline
+\end{longtable}
+
+\section{Tutoriel de fonctionnement}
+
+\subsection{1. Activer l'environnement Python}
+
+\begin{lstlisting}
+cd /mnt/c/Users/Stephane_Arnoux/arc-mem-bridge
+. .venv/bin/activate
+\end{lstlisting}
+
+\subsection{2. Verifier PostgreSQL}
+
+\begin{lstlisting}
+python scripts/check_postgres.py
+\end{lstlisting}
+
+Resultat attendu :
+
+\begin{lstlisting}
+"ok": true
+"database": "rag_arc"
+"vector": true
+"postgis": true
+"pg_trgm": true
+"pgcrypto": true
+\end{lstlisting}
+
+\subsection{3. Verifier Hindsight en PostgreSQL direct}
+
+\begin{lstlisting}
+python scripts/diagnose_hindsight.py
+\end{lstlisting}
+
+Resultat attendu :
+
+\begin{lstlisting}
+"ok": true
+"mode": "postgresql_direct"
+"facts": 661
+"sessions": 212
+"entities": 14
+\end{lstlisting}
+
+\subsection{4. Appliquer ou verifier les migrations}
+
+Les migrations sont idempotentes. Pour les auditer sans execution :
+
+\begin{lstlisting}
+python scripts/apply_migrations.py --dry-run
+\end{lstlisting}
+
+Pour les appliquer :
+
+\begin{lstlisting}
+python scripts/apply_migrations.py
+\end{lstlisting}
+
+\subsection{5. Demarrer l'API locale}
+
+\begin{lstlisting}
+uvicorn app.main:app --host 127.0.0.1 --port 8791
+\end{lstlisting}
+
+Puis tester :
+
+\begin{lstlisting}
+curl http://127.0.0.1:8791/health
+\end{lstlisting}
+
+\subsection{6. Utiliser la CLI}
+
+\begin{lstlisting}
+python -m app.cli.arc_mem health
+python -m app.cli.arc_mem check-postgres
+python -m app.cli.arc_mem diagnose-hermes
+python -m app.cli.arc_mem diagnose-hindsight
+python -m app.cli.arc_mem smoke-test
+\end{lstlisting}
+
+\subsection{7. Retenir un souvenir agentique}
+
+\begin{lstlisting}
+curl -X POST http://127.0.0.1:8791/memory/retain \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "ARC-MEM Bridge utilise Hindsight en postgresql_direct.",
+    "metadata": {"source": "tutorial", "type": "configuration"}
+  }'
+\end{lstlisting}
+
+En mode \texttt{postgresql\_direct}, cette route insere une ligne dans
+\texttt{hindsight\_hermes.facts}. Elle ne duplique pas ce souvenir dans
+MemGraphRAG.
+
+\subsection{8. Rappeler un souvenir agentique}
+
+\begin{lstlisting}
+curl -X POST http://127.0.0.1:8791/memory/recall \
+  -H "Content-Type: application/json" \
+  -d '{"query": "postgresql_direct", "limit": 5}'
+\end{lstlisting}
+
+\subsection{9. Ingerer un document probatoire}
+
+\begin{lstlisting}
+curl -X POST http://127.0.0.1:8791/ingest/document \
+  -H "Content-Type: application/json" \
+  -d '{
+    "title": "Note architecture ARC-MEM",
+    "content": "MemGraphRAG conserve les passages et les faits documentaires.",
+    "source_uri": "local://tutorial",
+    "metadata": {"domain": "architecture"}
+  }'
+\end{lstlisting}
+
+Cette operation ecrit dans \texttt{zora.documents} et \texttt{zora.chunks}. Les
+embeddings et l'extraction LLM restent des etapes configurees separement.
+
+\subsection{10. Recuperer un paquet de contexte}
+
+\begin{lstlisting}
+curl -X POST http://127.0.0.1:8791/retrieve \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query": "Comment ARC-MEM separe Hindsight et MemGraphRAG ?",
+    "expected_evidence_level": "standard",
+    "limit": 8
+  }'
+\end{lstlisting}
+
+La reponse n'est pas une reponse finale longue. Elle contient un
+\texttt{ContextBundle} :
+
+\begin{itemize}[leftmargin=*]
+  \item \texttt{memories} : contexte agentique Hindsight ;
+  \item \texttt{route\_paths} : chemins H-MEM ;
+  \item \texttt{facts} : faits MemGraphRAG ;
+  \item \texttt{passages} : chunks documentaires ;
+  \item \texttt{citations} : provenance ;
+  \item \texttt{warnings} : limites et indisponibilites.
+\end{itemize}
+
+\subsection{11. Auditer une reponse}
+
+\begin{lstlisting}
+curl -X POST http://127.0.0.1:8791/audit \
+  -H "Content-Type: application/json" \
+  -d '{
+    "taskcard": {"title": "Audit exemple"},
+    "proposed_answer": "Reponse courte",
+    "sources": [],
+    "citations": [],
+    "limits": [],
+    "risks": []
+  }'
+\end{lstlisting}
+
+Si sources, citations, limites ou risques manquent, l'audit retourne des
+\texttt{findings}.
+
+\section{Flux de retrieval}
+
+\begin{enumerate}[leftmargin=*]
+  \item L'utilisateur ou Hermes appelle \texttt{POST /retrieve}.
+  \item ZORA ARC cree une TASKCARD minimale.
+  \item Le routeur ZORA ARC calcule les signaux \texttt{Ct}, \texttt{Cs},
+  \texttt{Rk}, \texttt{Ex}, \texttt{Op}, \texttt{Tp}.
+  \item Hindsight fournit le contexte agentique via PostgreSQL direct.
+  \item H-MEM choisit un chemin de routage hierarchique.
+  \item MemGraphRAG recherche les faits/passages probatoires.
+  \item Le service de retrieval assemble un \texttt{ContextBundle}.
+\end{enumerate}
+
+\section{Securite et secrets}
+
+\begin{itemize}[leftmargin=*]
+  \item Ne jamais exposer \texttt{.env}.
+  \item Ne jamais afficher de cle complete dans les logs.
+  \item Les motifs \texttt{nvapi-*}, \texttt{sk-*}, tokens, passwords et secrets
+  sont masques par la couche de logging.
+  \item Les configurations Hermes/Hindsight sont sauvegardees avant modification.
+  \item PostgreSQL embedded est abandonne pour eviter les erreurs de locale
+  Windows et les locks de fichiers.
+\end{itemize}
+
+\section{Commandes de validation}
+
+\begin{lstlisting}
+python scripts/check_postgres.py
+python scripts/diagnose_hindsight.py
+python scripts/apply_migrations.py --dry-run
+python -m pytest
+python -m app.cli.arc_mem health
+uvicorn app.main:app --host 127.0.0.1 --port 8791
+\end{lstlisting}
+
+\section{Etat valide au 13 juin 2026}
+
+\begin{longtable}{|p{5cm}|p{9cm}|}
+\hline
+\textbf{Controle} & \textbf{Resultat} \\
+\hline
+PostgreSQL \texttt{rag\_arc} & OK \\
+\hline
+Extensions & \texttt{vector}, \texttt{postgis}, \texttt{pg\_trgm},
+\texttt{pgcrypto} OK \\
+\hline
+Hindsight & OK en \texttt{postgresql\_direct} \\
+\hline
+Memoire Hindsight & 661 faits, 212 sessions, 14 entites \\
+\hline
+Tests Python & 8 tests passent \\
+\hline
+API locale & \texttt{/health} repond OK \\
+\hline
+\end{longtable}
+
+\end{document}

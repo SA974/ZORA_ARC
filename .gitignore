@@ -1,0 +1,21 @@
+.env
+.env.*
+!.env.example
+*.log
+*.pid
+backup_before_cleanup_*/
+*.backup-*
+_audit_*.py
+_backup_dir.txt
+# Artefacts de build LaTeX (docs/)
+docs/*.aux
+docs/*.out
+docs/*.toc
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
