@@ -1,7 +1,11 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "arc-mem-bridge"
-version = "0.1.0"
-description = "ARC-MEM Bridge v0.1: local integration layer for Hermes, Hindsight, MemGraphRAG, H-MEM and PostgreSQL."
+version = "0.2.0"
+description = "ARC-MEM Bridge: local integration layer (100% Ollama) for Hermes, Hindsight, MemGraphRAG, H-MEM and PostgreSQL/pgvector."
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115.0",
@@ -11,12 +15,20 @@ dependencies = [
   "pydantic-settings>=2.4.0",
   "python-dotenv>=1.0.1",
   "httpx>=0.27.0",
+  "pymupdf>=1.24.0",
   "networkx>=3.3",
 ]
 
 [project.optional-dependencies]
 test = ["pytest>=8.3.0"]
+# OCR optionnel pour les PDF scannés (ENABLE_OCR=1). Lourd : installer uniquement si besoin.
+ocr = ["paddleocr>=2.7.0", "numpy>=1.26.0"]
+
+# Deux blocs fonctionnels exposés sous src/ (façade au-dessus de l'implémentation `app`).
+[tool.setuptools.packages.find]
+where = [".", "src"]
+include = ["app*", "arc_mem_system*"]
 
 [tool.pytest.ini_options]
 testpaths = ["app/tests"]
-pythonpath = ["."]
+pythonpath = [".", "src"]

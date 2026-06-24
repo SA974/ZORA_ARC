@@ -92,6 +92,24 @@ python scripts/validate_lots_0_2.py       # validation Ollama / PostgreSQL / PDF
 python scripts/validate_lot3.py           # validation robustesse (preflight, health)
 ```
 
+## Architecture en deux blocs
+
+Le système est organisé en deux blocs fonctionnels exposés sous `src/arc_mem_system/`
+(façade stable au-dessus de l'implémentation `app/`, sans casser les imports existants) :
+
+```text
+arc_mem_system/
+├── arc_mem_bridge/      # pont Hermes↔PostgreSQL, ingestion PDF, chunks, embeddings, Ollama, healthcheck
+└── memory_rag_core/     # H-MEM (hiérarchie + retrieval scoré) + MemGraphRAG (entités/faits/passages/conflits)
+```
+
+```python
+from arc_mem_system.arc_mem_bridge import ingest_pdf_file, IngestionPipeline, check_ollama
+from arc_mem_system.memory_rag_core import hmem_retrieve, MemGraphService, score_candidate
+```
+
+Installation éditable (expose les deux blocs) : `pip install -e .`
+
 ## Définition de `content_length`
 
 Volontairement **deux champs** distincts (colonnes générées dans `zora.chunks`) :
