@@ -142,3 +142,14 @@ Corriger avant de conclure.
 
 Le guide d'installation, de configuration Ollama, de migrations PostgreSQL/pgvector,
 d'ingestion PDF et de tests se trouve dans **[docs/QUICKSTART.md](docs/QUICKSTART.md)**.
+
+## Références scientifiques
+
+Ce projet implémente localement (100 % Ollama) des idées de deux travaux de recherche —
+voir **[REFERENCES.md](REFERENCES.md)** pour les citations complètes (BibTeX) :
+
+- **H-MEM** — *Hierarchical Memory for High-Efficiency Long-Term Reasoning in LLM Agents*,
+  Haoran Sun, Shaoning Zeng, 2025. [arXiv:2507.22925](https://arxiv.org/abs/2507.22925)
+- **MemGraphRAG** — *Memory-based Multi-Agent System for Graph Retrieval-Augmented Generation*,
+  Chuanjie Wu et al., KDD 2026. [arXiv:2606.00610](https://arxiv.org/abs/2606.00610) ·
+  [code](https://github.com/XMUDeepLIT/MemGraphRAG)
